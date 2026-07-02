@@ -2,8 +2,9 @@ import os
 import json
 import re
 import io
+from functools import wraps
 from datetime import datetime
-from flask import Flask, request, jsonify, send_file, render_template
+from flask import Flask, request, jsonify, send_file, render_template, Response
 import anthropic
 from docx import Document
 from docx.shared import Pt, RGBColor, Cm
@@ -15,6 +16,36 @@ app = Flask(__name__)
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 MODEL = "claude-sonnet-5"
+
+# --- Protezione con password (HTTP Basic Auth) ---
+# Impostare su Railway → Variables: APP_USERNAME e APP_PASSWORD
+# Se APP_PASSWORD non è impostata, il sito resta accessibile senza password.
+APP_USERNAME = os.environ.get("APP_USERNAME", "czp")
+APP_PASSWORD = os.environ.get("APP_PASSWORD")
+
+
+def check_auth(username, password):
+    return username == APP_USERNAME and password == APP_PASSWORD
+
+
+def authenticate():
+    return Response(
+        "Accesso protetto. Inserisci le credenziali per continuare.",
+        401,
+        {"WWW-Authenticate": 'Basic realm="Briefing Note Generator"'},
+    )
+
+
+def requires_auth(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not APP_PASSWORD:
+            return f(*args, **kwargs)
+        auth = request.authorization
+        if not auth or not check_auth(auth.username, auth.password):
+            return authenticate()
+        return f(*args, **kwargs)
+    return decorated
 
 SEARCH_PROMPT = """Cerca informazioni aggiornate e dettagliate su questa persona:
 - Nome: {nome}{istituzione}
@@ -372,11 +403,13 @@ def generate_docx(d, data_meeting):
 
 
 @app.route("/")
+@requires_auth
 def index():
     return render_template("index.html")
 
 
 @app.route("/api/generate", methods=["POST"])
+@requires_auth
 def generate():
     data = request.get_json()
     nome = data.get("nome", "").strip()
@@ -416,6 +449,7 @@ def generate():
 
 
 @app.route("/api/docx", methods=["POST"])
+@requires_auth
 def docx_endpoint():
     data = request.get_json()
     data_meeting = data.get("dataMeeting", "")

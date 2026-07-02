@@ -72,7 +72,7 @@ Ti viene fornito un testo con informazioni su una persona, già corredato di URL
 
 Regole assolute:
 - Rispondi SOLO con JSON valido, nessun testo prima o dopo
-- Nessun tag HTML, nessun markdown, nessun <cite>, testo plain
+- Nessun tag HTML, nessun markdown, nessun , testo plain
 - Italiano formale e istituzionale
 - Se un'informazione non è disponibile scrivi "Dato non disponibile"
 - Per ogni campo "_url" e ogni "url" nei focus_items: riporta l'URL esatto fornito nel testo di ricerca per quel punto specifico. Se il testo non fornisce un URL per un dato punto, usa null — non inventare e non riutilizzare un URL di un altro punto.
@@ -106,7 +106,7 @@ def strip_cite(text):
     """Rimuove tag <cite> e markup dal testo."""
     if not text:
         return text
-    text = re.sub(r'<cite[^>]*>([\s\S]*?)</cite>', r'\1', text)
+    text = re.sub(r'<cite[^>]*>([\s\S]*?)', r'\1', text)
     text = re.sub(r'</?cite[^>]*>', '', text)
     text = re.sub(r'\[?\(Link\)\]?\([^)]*\)', '', text)
     text = re.sub(r'\s+', ' ', text).strip()
@@ -129,23 +129,21 @@ def call_anthropic_with_search(prompt):
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     messages = [{"role": "user", "content": prompt}]
     tools = [{"type": "web_search_20250305", "name": "web_search"}]
-    research_text = ""
+    text_chunks = []
 
     for _ in range(10):
         response = client.messages.create(
             model=MODEL,
-            max_tokens=4000,
+            max_tokens=8000,
             tools=tools,
             messages=messages,
         )
 
         messages.append({"role": "assistant", "content": response.content})
 
-        if response.stop_reason == "end_turn":
-            for block in response.content:
-                if hasattr(block, "text"):
-                    research_text = block.text
-            break
+        for block in response.content:
+            if hasattr(block, "text") and block.text:
+                text_chunks.append(block.text)
 
         if response.stop_reason == "tool_use":
             tool_results = []
@@ -157,8 +155,15 @@ def call_anthropic_with_search(prompt):
                         "content": "Continua la ricerca.",
                     })
             messages.append({"role": "user", "content": tool_results})
+            continue
 
-    return research_text
+        # end_turn, max_tokens, stop_sequence, ecc.: fermiamo il loop qui.
+        # Non richiamare più l'API con l'ultimo messaggio da "assistant",
+        # altrimenti l'API rifiuta la richiesta (richiede che l'ultimo
+        # messaggio sia "user").
+        break
+
+    return "\n".join(text_chunks)
 
 
 def call_anthropic_json(research_text, focus, data_meeting):

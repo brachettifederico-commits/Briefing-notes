@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Briefing Note Generator · CZP</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --ink: #1a1814;
+      --ink-soft: #4a4540;
+      --ink-faint: #8a8480;
+      --paper: #f7f4ef;
+      --paper-warm: #ede9e2;
+      --paper-dark: #e0dbd2;
+      --accent: #1F3864;
+      --link: #2a5cb8;
+      --border: #ccc8c0;
+      --font-serif: 'EB Garamond', Georgia, serif;
+      --font-mono: 'DM Mono', monospace;
+    }
+
+    html, body { height: 100%; background: var(--paper); color: var(--ink); font-family: var(--font-serif); font-size: 17px; line-height: 1.6; }
+
+    .shell { min-height: 100vh; display: grid; grid-template-columns: 360px 1fr; }
+
+    .sidebar {
+      background: var(--accent); color: white;
+      padding: 3rem 2.5rem;
+      display: flex; flex-direction: column; gap: 2rem;
+      position: sticky; top: 0; height: 100vh; overflow-y: auto;
+    }
+
+    .brand .label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 2px; text-transform: uppercase; opacity: .55; }
+    .brand h1 { font-size: 24px; font-weight: 500; line-height: 1.2; margin-top: 6px; }
+    .brand p { font-size: 13px; opacity: .6; line-height: 1.5; margin-top: 4px; }
+
+    .form-group { display: flex; flex-direction: column; gap: 5px; }
+    .form-group label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; opacity: .65; }
+    .form-group .hint { font-size: 12px; opacity: .45; margin-top: -2px; }
+    .form-group input {
+      background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2);
+      border-radius: 4px; color: white; font-family: var(--font-serif); font-size: 15px;
+      padding: 9px 12px; outline: none; transition: border-color .2s, background .2s;
+    }
+    .form-group input::placeholder { color: rgba(255,255,255,.35); }
+    .form-group input:focus { border-color: rgba(255,255,255,.6); background: rgba(255,255,255,.15); }
+    .form-group input[type="date"] { color-scheme: dark; }
+
+    .generate-btn {
+      padding: 12px 20px; background: white; color: var(--accent);
+      border: none; border-radius: 4px; font-family: var(--font-serif);
+      font-size: 15px; font-weight: 500; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      transition: opacity .2s;
+    }
+    .generate-btn:hover:not(:disabled) { opacity: .9; }
+    .generate-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+    .spinner { width: 14px; height: 14px; border: 2px solid rgba(31,56,100,.3); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; display: none; }
+    .loading .spinner { display: block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .error-box { background: rgba(255,255,255,.12); border: 1px solid rgba(255,100,100,.4); border-radius: 4px; padding: 10px 14px; font-size: 13px; color: #ffb3b3; line-height: 1.5; display: none; }
+    .error-box.visible { display: block; }
+
+    .main { padding: 4rem 3.5rem; max-width: 800px; }
+
+    .empty-state { display: flex; flex-direction: column; gap: 16px; padding-top: 4rem; color: var(--ink-faint); }
+    .empty-state .big { font-size: 96px; line-height: 1; color: var(--paper-dark); font-weight: 500; letter-spacing: -4px; user-select: none; }
+    .empty-state p { font-size: 15px; max-width: 320px; line-height: 1.7; }
+
+    .skeleton { display: none; flex-direction: column; gap: 1rem; padding-top: 1rem; }
+    .skeleton.visible { display: flex; }
+    .skel { height: 14px; background: linear-gradient(90deg, var(--paper-dark) 25%, var(--paper-warm) 50%, var(--paper-dark) 75%); background-size: 200% 100%; border-radius: 3px; animation: shimmer 1.4s infinite; }
+    @keyframes shimmer { to { background-position: -200% 0; } }
+
+    .preview { display: none; }
+    .preview.visible { display: block; }
+
+    .preview-header { border-bottom: 2px solid var(--accent); padding-bottom: 1.5rem; margin-bottom: 2rem; }
+    .preview-meta { font-family: var(--font-mono); font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 8px; }
+    .preview-name { font-size: 40px; font-weight: 500; color: var(--accent); line-height: 1.1; letter-spacing: -.5px; margin-bottom: 6px; }
+    .preview-role { font-size: 16px; color: var(--ink-soft); }
+    .preview-bg { font-size: 14px; color: var(--ink-faint); font-style: italic; margin-top: 4px; }
+
+    .section { display: grid; grid-template-columns: 180px 1fr; border-bottom: 1px solid var(--border); }
+    .section:last-of-type { border-bottom: none; }
+    .section-label { padding: 1.5rem 1.5rem 1.5rem 0; font-family: var(--font-mono); font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--ink-faint); line-height: 1.4; }
+    .section-content { padding: 1.5rem 0 1.5rem 1.5rem; font-size: 15px; line-height: 1.8; border-left: 1px solid var(--border); }
+
+    .section-actions { display: flex; gap: 8px; margin-top: 10px; }
+    .edit-btn { font-family: var(--font-mono); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; padding: 4px 10px; border: 1px solid var(--border); border-radius: 3px; background: transparent; color: var(--ink-faint); cursor: pointer; transition: all .15s; }
+    .edit-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    .edit-area { width: 100%; min-height: 120px; font-family: var(--font-serif); font-size: 14px; line-height: 1.7; padding: 10px; border: 1px solid var(--border); border-radius: 4px; resize: vertical; display: none; margin-top: 8px; }
+    .edit-area.visible { display: block; }
+    .save-btn { font-family: var(--font-mono); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; padding: 4px 10px; border: 1px solid var(--accent); border-radius: 3px; background: var(--accent); color: white; cursor: pointer; display: none; margin-top: 6px; }
+    .save-btn.visible { display: inline-block; }
+
+    .focus-item { margin-bottom: 1rem; }
+    .focus-item:last-child { margin-bottom: 0; }
+    .source-link { font-family: var(--font-mono); font-size: 11px; color: var(--link); text-decoration: none; margin-left: 6px; opacity: .8; }
+    .source-link:hover { opacity: 1; text-decoration: underline; }
+
+    .download-bar { margin-top: 2.5rem; padding-top: 2rem; border-top: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
+    .download-btn { padding: 10px 24px; background: var(--accent); color: white; border: none; border-radius: 4px; font-family: var(--font-serif); font-size: 15px; cursor: pointer; transition: opacity .2s; }
+    .download-btn:hover { opacity: .85; }
+    .download-btn:disabled { opacity: .4; cursor: not-allowed; }
+    .download-hint { font-size: 13px; color: var(--ink-faint); font-style: italic; }
+
+    /* Cronologia */
+    .history-block { display: flex; flex-direction: column; gap: 10px; border-top: 1px solid rgba(255,255,255,.15); padding-top: 1.5rem; }
+    .history-header { display: flex; align-items: center; justify-content: space-between; }
+    .history-title { font-family: var(--font-mono); font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; opacity: .65; }
+    .history-clear { font-family: var(--font-mono); font-size: 10px; background: none; border: none; color: rgba(255,255,255,.5); cursor: pointer; text-decoration: underline; }
+    .history-clear:hover { color: white; }
+    .history-list { display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow-y: auto; }
+    .history-empty { font-size: 12px; opacity: .4; font-style: italic; }
+    .history-item { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 8px 10px; border-radius: 4px; background: rgba(255,255,255,.06); cursor: pointer; transition: background .15s; }
+    .history-item:hover { background: rgba(255,255,255,.14); }
+    .history-item-main { min-width: 0; }
+    .history-item-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .history-item-meta { font-family: var(--font-mono); font-size: 10px; opacity: .5; margin-top: 2px; }
+    .history-item-del { background: none; border: none; color: rgba(255,255,255,.35); font-size: 14px; cursor: pointer; padding: 2px 6px; flex-shrink: 0; }
+    .history-item-del:hover { color: #ffb3b3; }
+
+    @media (max-width: 860px) {
+      .shell { grid-template-columns: 1fr; }
+      .sidebar { position: static; height: auto; }
+      .main { padding: 2rem 1.5rem; }
+      .section { grid-template-columns: 1fr; }
+      .section-content { border-left: none; padding-left: 0; border-top: 1px solid var(--border); padding-top: 1rem; }
+    }
+  </style>
+</head>
+<body>
+<div class="shell">
+
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="label">CZP &amp; Co.</span>
+      <h1>Briefing Note<br/>Generator</h1>
+      <p>Inserisci i dati della persona. Claude cercherà informazioni aggiornate e compilerà la note nel formato CZP.</p>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:1.1rem;">
+      <div class="form-group">
+        <label>Nome e Cognome *</label>
+        <input id="nome" type="text" placeholder="es. Mario Rossi" autocomplete="off" />
+      </div>
+      <div class="form-group">
+        <label>Istituzione / Ruolo</label>
+        <span class="hint">Opzionale — per disambiguare</span>
+        <input id="istituzione" type="text" placeholder="es. Senato, AGCOM, MEF…" autocomplete="off" />
+      </div>
+      <div class="form-group">
+        <label>Focus tematico *</label>
+        <span class="hint">Varia in base al cliente</span>
+        <input id="focus" type="text" placeholder="es. IA e cloud, Trasporti…" autocomplete="off" />
+      </div>
+      <div class="form-group">
+        <label>Data del meeting</label>
+        <span class="hint">Opzionale</span>
+        <input id="dataMeeting" type="date" />
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <button class="generate-btn" id="generateBtn" onclick="generate()">
+        <div class="spinner" id="spinner"></div>
+        <span id="btnText">Genera briefing note</span>
+      </button>
+      <div class="error-box" id="errorBox"></div>
+    </div>
+
+    <div class="history-block">
+      <div class="history-header">
+        <span class="history-title">Cronologia</span>
+        <button class="history-clear" id="clearHistoryBtn" onclick="clearHistory()">Svuota</button>
+      </div>
+      <div class="history-list" id="historyList"></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="empty-state" id="emptyState">
+      <div class="big">—</div>
+      <p>Compila i campi a sinistra e premi <em>Genera</em> per produrre una briefing note istituzionale con ricerca automatica.</p>
+    </div>
+
+    <div class="skeleton" id="skeleton">
+      <div class="skel" style="width:60%;height:44px;margin-bottom:8px;"></div>
+      <div class="skel" style="width:40%;"></div>
+      <div class="skel" style="width:50%;margin-bottom:2rem;"></div>
+      <div class="skel" style="width:100%;"></div>
+      <div class="skel" style="width:95%;"></div>
+      <div class="skel" style="width:90%;"></div>
+      <div class="skel" style="width:80%;"></div>
+      <div class="skel" style="width:100%;margin-top:1rem;"></div>
+      <div class="skel" style="width:88%;"></div>
+    </div>
+
+    <div class="preview" id="preview"></div>
+  </main>
+</div>
+
+<script>
+let currentData = null;
+const HISTORY_KEY = "czp_briefing_history";
+const HISTORY_MAX = 30;
+
+function escHtml(s) {
+  return (s || "")
+    .replace(/<cite[^>]*>([\s\S]*?)<\/cite>/g, "$1")
+    .replace(/<\/?cite[^>]*>/g, "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function linkHtml(url) {
+  if (!url) return "";
+  return `<a class="source-link" href="${escHtml(url)}" target="_blank" rel="noreferrer">(Link)</a>`;
+}
+
+/* ---------- Cronologia (localStorage) ---------- */
+
+function loadHistory() {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory(list) {
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(list));
+  } catch {
+    /* storage pieno o non disponibile: ignora silenziosamente */
+  }
+}
+
+function addToHistory(data) {
+  const list = loadHistory();
+  const entry = {
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+    nome: data.nome || "Senza nome",
+    istituzione: data.istituzione_contesto || "",
+    focus: data.focus_titolo || "",
+    timestamp: new Date().toISOString(),
+    data: data,
+  };
+  list.unshift(entry);
+  saveHistory(list.slice(0, HISTORY_MAX));
+  renderHistory();
+}
+
+function removeFromHistory(id) {
+  const list = loadHistory().filter(e => e.id !== id);
+  saveHistory(list);
+  renderHistory();
+}
+
+function clearHistory() {
+  if (!confirm("Svuotare tutta la cronologia delle briefing generate?")) return;
+  saveHistory([]);
+  renderHistory();
+}
+
+function loadFromHistory(id) {
+  const entry = loadHistory().find(e => e.id === id);
+  if (!entry) return;
+  currentData = { ...entry.data };
+  renderPreview(entry.data, entry.data.dataMeeting);
+  hideError();
+}
+
+function formatHistoryDate(iso) {
+  try {
+    return new Date(iso).toLocaleDateString("it-IT", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return "";
+  }
+}
+
+function renderHistory() {
+  const list = loadHistory();
+  const container = document.getElementById("historyList");
+  if (!list.length) {
+    container.innerHTML = `<div class="history-empty">Nessuna briefing generata finora.</div>`;
+    return;
+  }
+  container.innerHTML = list.map(entry => `
+    <div class="history-item" onclick="loadFromHistory('${entry.id}')">
+      <div class="history-item-main">
+        <div class="history-item-name">${escHtml(entry.nome)}</div>
+        <div class="history-item-meta">${escHtml(entry.focus)} · ${formatHistoryDate(entry.timestamp)}</div>
+      </div>
+      <button class="history-item-del" title="Rimuovi" onclick="event.stopPropagation(); removeFromHistory('${entry.id}')">✕</button>
+    </div>
+  `).join("");
+}
+
+/* ---------- Generazione ---------- */
+
+async function generate() {
+  const nome = document.getElementById("nome").value.trim();
+  const istituzione = document.getElementById("istituzione").value.trim();
+  const focus = document.getElementById("focus").value.trim();
+  const dataMeeting = document.getElementById("dataMeeting").value;
+
+  if (!nome || !focus) { showError("Nome e focus tematico sono obbligatori."); return; }
+
+  setLoading(true);
+  hideError();
+  showSkeleton();
+
+  try {
+    const res = await fetch("/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nome, istituzione, focus, dataMeeting }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Errore sconosciuto");
+    currentData = { ...data, dataMeeting };
+    renderPreview(data, dataMeeting);
+    addToHistory(currentData);
+  } catch (err) {
+    showError(err.message);
+    hideSkeleton();
+    document.getElementById("emptyState").style.display = "flex";
+  } finally {
+    setLoading(false);
+  }
+}
+
+function renderPreview(d, dataMeeting) {
+  const today = dataMeeting
+    ? new Date(dataMeeting + "T12:00:00").toLocaleDateString("it-IT", { day: "numeric", month: "long", year: "numeric" })
+    : new Date().toLocaleDateString("it-IT", { day: "numeric", month: "long", year: "numeric" });
+
+  const focusHtml = (d.focus_items || []).map((item, i) => `
+    <div class="focus-item" id="focus-item-${i}">
+      <strong>${escHtml(item.titolo)}.</strong>
+      <span id="focus-text-${i}">${escHtml(item.testo)}</span>
+      ${linkHtml(item.url)}
+      <div class="section-actions">
+        <button class="edit-btn" onclick="toggleEdit('focus-item-${i}', 'focus-text-${i}', ${i})">Modifica</button>
+      </div>
+      <textarea class="edit-area" id="edit-focus-${i}" rows="4">${(item.testo||"")}</textarea>
+      <button class="save-btn" id="save-focus-${i}" onclick="saveField('focus-text-${i}', 'edit-focus-${i}', 'save-focus-${i}', 'edit-focus-area-${i}', ${i})">Salva</button>
+    </div>
+  `).join("");
+
+  document.getElementById("preview").innerHTML = `
+    <div class="preview-header">
+      <div class="preview-meta">Briefing Note · ${escHtml(d.istituzione_contesto||"")} · ${today}</div>
+      <div class="preview-name">${escHtml(d.nome)}</div>
+      <div class="preview-role">${escHtml(d.ruolo_attuale)}</div>
+      <div class="preview-bg">${escHtml(d.background_sintetico)}</div>
+    </div>
+
+    <div class="section">
+      <div class="section-label">Anagrafica</div>
+      <div class="section-content">${escHtml(d.luogo_nascita)}</div>
+    </div>
+
+    <div class="section">
+      <div class="section-label">Carriera<br/>professionale</div>
+      <div class="section-content">
+        <span id="text-prof">${escHtml(d.carriera_professionale)}</span>
+        ${linkHtml(d.carriera_professionale_url)}
+        <div class="section-actions">
+          <button class="edit-btn" onclick="toggleEdit('text-prof', 'text-prof', 'prof')">Modifica</button>
+        </div>
+        <textarea class="edit-area" id="edit-prof">${(d.carriera_professionale||"")}</textarea>
+        <button class="save-btn" id="save-prof" onclick="saveFieldSimple('text-prof', 'edit-prof', 'save-prof', 'carriera_professionale')">Salva</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-label">Carriera<br/>politica</div>
+      <div class="section-content">
+        <span id="text-pol">${escHtml(d.carriera_politica)}</span>
+        ${linkHtml(d.carriera_politica_url)}
+        <div class="section-actions">
+          <button class="edit-btn" onclick="toggleEdit('text-pol', 'text-pol', 'pol')">Modifica</button>
+        </div>
+        <textarea class="edit-area" id="edit-pol">${(d.carriera_politica||"")}</textarea>
+        <button class="save-btn" id="save-pol" onclick="saveFieldSimple('text-pol', 'edit-pol', 'save-pol', 'carriera_politica')">Salva</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-label">Focus<br/>${escHtml(d.focus_titolo)}</div>
+      <div class="section-content">${focusHtml}</div>
+    </div>
+
+    <div class="download-bar">
+      <button class="download-btn" id="downloadBtn" onclick="downloadDocx()">Scarica .docx</button>
+      <span class="download-hint">Nel formato CZP con hyperlink alle fonti</span>
+    </div>
+  `;
+
+  hideSkeleton();
+  document.getElementById("emptyState").style.display = "none";
+  document.getElementById("preview").classList.add("visible");
+}
+
+function toggleEdit(containerId, textId, key) {
+  const editId = `edit-${key}`;
+  const saveId = `save-${key}`;
+  const editEl = document.getElementById(editId);
+  const saveEl = document.getElementById(saveId);
+  if (editEl) { editEl.classList.toggle("visible"); }
+  if (saveEl) { saveEl.classList.toggle("visible"); }
+}
+
+function saveFieldSimple(textId, editId, saveId, dataKey) {
+  const newVal = document.getElementById(editId).value;
+  document.getElementById(textId).textContent = newVal;
+  if (currentData) currentData[dataKey] = newVal;
+  document.getElementById(editId).classList.remove("visible");
+  document.getElementById(saveId).classList.remove("visible");
+}
+
+function saveField(textId, editId, saveId, areaId, index) {
+  const newVal = document.getElementById(editId).value;
+  document.getElementById(textId).textContent = newVal;
+  if (currentData && currentData.focus_items && currentData.focus_items[index]) {
+    currentData.focus_items[index].testo = newVal;
+  }
+  document.getElementById(editId).classList.remove("visible");
+  document.getElementById(saveId).classList.remove("visible");
+}
+
+async function downloadDocx() {
+  if (!currentData) return;
+  const btn = document.getElementById("downloadBtn");
+  btn.disabled = true;
+  btn.textContent = "Generazione...";
+  try {
+    const res = await fetch("/api/docx", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(currentData),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      alert("Errore: " + err.error);
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Briefing_Note_${(currentData.nome||"").replace(/\s+/g,"_")}.docx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    alert("Errore download: " + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Scarica .docx";
+  }
+}
+
+function setLoading(on) {
+  const btn = document.getElementById("generateBtn");
+  btn.disabled = on;
+  document.getElementById("spinner").style.display = on ? "block" : "none";
+  document.getElementById("btnText").textContent = on ? "Generazione in corso…" : "Genera briefing note";
+  btn.classList.toggle("loading", on);
+}
+
+function showSkeleton() {
+  document.getElementById("emptyState").style.display = "none";
+  document.getElementById("preview").classList.remove("visible");
+  document.getElementById("skeleton").classList.add("visible");
+}
+
+function hideSkeleton() { document.getElementById("skeleton").classList.remove("visible"); }
+function showError(msg) { const el = document.getElementById("errorBox"); el.textContent = msg; el.classList.add("visible"); }
+function hideError() { document.getElementById("errorBox").classList.remove("visible"); }
+
+document.addEventListener("keydown", e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) generate(); });
+
+renderHistory();
+</script>
+</body>
+</html>

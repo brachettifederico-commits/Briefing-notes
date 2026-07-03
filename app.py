@@ -10,7 +10,7 @@ from docx import Document
 from docx.shared import Pt, RGBColor, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
-from docx.oxml import OxmlElement
+from docx.oxml import OxmlElement, parse_xml
 
 app = Flask(__name__)
 
@@ -72,7 +72,7 @@ Ti viene fornito un testo con informazioni su una persona, già corredato di URL
 
 Regole assolute:
 - Rispondi SOLO con JSON valido, nessun testo prima o dopo
-- Nessun tag HTML, nessun markdown, nessun , testo plain
+- Nessun tag HTML, nessun markdown, nessun <cite>, testo plain
 - Italiano formale e istituzionale
 - Se un'informazione non è disponibile scrivi "Dato non disponibile"
 - Per ogni campo "_url" e ogni "url" nei focus_items: riporta l'URL esatto fornito nel testo di ricerca per quel punto specifico. Se il testo non fornisce un URL per un dato punto, usa null — non inventare e non riutilizzare un URL di un altro punto.
@@ -101,12 +101,21 @@ Formato JSON esatto:
 
 focus_items: 4-6 voci rilevanti al focus tematico richiesto, ciascuna con fonte propria quando disponibile."""
 
+# --- Stile grafico del documento Word (formato "Bioprofile" CZP) ---
+FONT_NAME = "Trebuchet MS"
+NAVY = RGBColor(0x00, 0x20, 0x60)
+GRAY_TEXT = RGBColor(0x33, 0x33, 0x33)
+GRAY_LINE = "CCCCCC"
+WHITE = RGBColor(0xFF, 0xFF, 0xFF)
+ICON_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+ICON_PROFESSIONALE = os.path.join(ICON_DIR, "icon_professionale.png")
+
 
 def strip_cite(text):
     """Rimuove tag <cite> e markup dal testo."""
     if not text:
         return text
-    text = re.sub(r'<cite[^>]*>([\s\S]*?)', r'\1', text)
+    text = re.sub(r'<cite[^>]*>([\s\S]*?)</cite>', r'\1', text)
     text = re.sub(r'</?cite[^>]*>', '', text)
     text = re.sub(r'\[?\(Link\)\]?\([^)]*\)', '', text)
     text = re.sub(r'\s+', ' ', text).strip()
@@ -228,18 +237,22 @@ def add_hyperlink(paragraph, text, url):
     paragraph._p.append(hyperlink)
 
 
-def set_cell_border(cell, color="CCCCCC"):
-    """Imposta i bordi di una cella."""
+def set_cell_border(cell, sides=("top", "left", "bottom", "right"), val="single", sz="4", color="CCCCCC"):
+    """Imposta i bordi di una cella (o li rimuove con val='nil')."""
     tc = cell._tc
     tcPr = tc.get_or_add_tcPr()
-    tcBorders = OxmlElement("w:tcBorders")
-    for side in ["top", "left", "bottom", "right"]:
-        border = OxmlElement(f"w:{side}")
-        border.set(qn("w:val"), "single")
-        border.set(qn("w:sz"), "4")
+    tcBorders = tcPr.find(qn("w:tcBorders"))
+    if tcBorders is None:
+        tcBorders = OxmlElement("w:tcBorders")
+        tcPr.append(tcBorders)
+    for side in sides:
+        border = tcBorders.find(qn(f"w:{side}"))
+        if border is None:
+            border = OxmlElement(f"w:{side}")
+            tcBorders.append(border)
+        border.set(qn("w:val"), val)
+        border.set(qn("w:sz"), sz)
         border.set(qn("w:color"), color)
-        tcBorders.append(border)
-    tcPr.append(tcBorders)
 
 
 def set_cell_shading(cell, fill="F2F2F2"):
@@ -253,8 +266,165 @@ def set_cell_shading(cell, fill="F2F2F2"):
     tcPr.append(shd)
 
 
+def set_row_height(row, cm_value, rule="exact"):
+    """Imposta un'altezza fissa per una riga di tabella."""
+    tr = row._tr
+    trPr = tr.get_or_add_trPr()
+    trHeight = OxmlElement("w:trHeight")
+    trHeight.set(qn("w:val"), str(int(cm_value * 567)))
+    trHeight.set(qn("w:hRule"), rule)
+    trPr.append(trHeight)
+
+
+def add_paragraph_border(paragraph, sides=("bottom",), color="002060", sz="8", space="8"):
+    """Aggiunge una linea sottile sopra/sotto un paragrafo (usata come divisore)."""
+    pPr = paragraph._p.get_or_add_pPr()
+    pBdr = pPr.find(qn("w:pBdr"))
+    if pBdr is None:
+        pBdr = OxmlElement("w:pBdr")
+        pPr.append(pBdr)
+    for side in sides:
+        border = OxmlElement(f"w:{side}")
+        border.set(qn("w:val"), "single")
+        border.set(qn("w:sz"), sz)
+        border.set(qn("w:space"), space)
+        border.set(qn("w:color"), color)
+        pBdr.append(border)
+
+
+def set_run_font(run, size=10, color=GRAY_TEXT, bold=False, name=FONT_NAME):
+    """Applica font/size/colore/bold a un run in un colpo solo."""
+    run.font.name = name
+    run.font.size = Pt(size)
+    run.font.color.rgb = color
+    run.bold = bold
+    return run
+
+
+def add_cover_page(doc, d, data_meeting):
+    """Copertina navy a piena pagina, stile CZP Bioprofile."""
+    if data_meeting:
+        try:
+            dt = datetime.strptime(data_meeting, "%Y-%m-%d")
+            today = dt.strftime("%-d %B %Y")
+        except Exception:
+            today = data_meeting
+    else:
+        today = datetime.now().strftime("%-d %B %Y")
+
+    table = doc.add_table(rows=1, cols=1)
+    table.autofit = False
+    cell = table.cell(0, 0)
+    cell.width = Cm(17)
+    set_row_height(table.rows[0], 25.2, rule="exact")
+    set_cell_shading(cell, fill="002060")
+    set_cell_border(cell, val="nil", color="002060")
+
+    tcPr = cell._tc.get_or_add_tcPr()
+    tcMar = OxmlElement("w:tcMar")
+    for side, val in [("top", "1600"), ("left", "300"), ("right", "300"), ("bottom", "300")]:
+        m = OxmlElement(f"w:{side}")
+        m.set(qn("w:w"), val)
+        m.set(qn("w:type"), "dxa")
+        tcMar.append(m)
+    tcPr.append(tcMar)
+
+    p_spacer = cell.paragraphs[0]
+
+    p_line1 = cell.add_paragraph()
+    add_paragraph_border(p_line1, sides=("bottom",), color="FFFFFF", sz="6", space="10")
+
+    p_title = cell.add_paragraph()
+    r1 = p_title.add_run("BRIEFING")
+    set_run_font(r1, size=40, color=WHITE, bold=True)
+    r1.add_break()
+    r2 = p_title.add_run("NOTE")
+    set_run_font(r2, size=40, color=WHITE, bold=True)
+
+    p_sub = cell.add_paragraph()
+    sub_text = d.get("istituzione_contesto", "") or "Nota istituzionale"
+    r3 = p_sub.add_run(sub_text)
+    set_run_font(r3, size=14, color=WHITE, bold=False)
+    add_paragraph_border(p_sub, sides=("bottom",), color="FFFFFF", sz="6", space="10")
+
+    p_date = cell.add_paragraph()
+    r4 = p_date.add_run(today)
+    set_run_font(r4, size=11, color=WHITE, bold=False)
+
+    doc.add_page_break()
+
+
+def add_circle_photo_placeholder(paragraph, diameter_pt=90):
+    """Inserisce un cerchio tratteggiato vuoto (VML) dove incollare la foto a mano."""
+    run = paragraph.add_run()
+    pict = OxmlElement("w:pict")
+
+    ns = ('xmlns:v="urn:schemas-microsoft-com:vml" '
+          'xmlns:w10="urn:schemas-microsoft-com:office:word" '
+          'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"')
+    oval_xml = f'''<v:oval {ns} style="width:{diameter_pt}pt;height:{diameter_pt}pt"
+        strokecolor="#999999" strokeweight="1pt" fillcolor="#FAFAFA">
+        <v:stroke dashstyle="dash"/>
+        <v:textbox inset="0,0,0,0">
+            <w:txbxContent>
+                <w:p><w:pPr><w:jc w:val="center"/></w:pPr>
+                <w:r><w:rPr><w:rFonts w:ascii="{FONT_NAME}" w:hAnsi="{FONT_NAME}"/><w:color w:val="999999"/><w:sz w:val="16"/></w:rPr><w:t>FOTO</w:t></w:r>
+                </w:p>
+            </w:txbxContent>
+        </v:textbox>
+    </v:oval>'''
+    oval = parse_xml(oval_xml)
+    pict.append(oval)
+    run._r.append(pict)
+
+
+def add_icon_image(paragraph, image_path, width_cm=0.9):
+    """Inserisce un'icona immagine (es. omino) centrata in un paragrafo."""
+    run = paragraph.add_run()
+    run.add_picture(image_path, width=Cm(width_cm))
+
+
+def add_section(doc, label, body_text=None, url=None, icon_char=None, icon_image=None, is_last=False):
+    """Aggiunge una sezione a due colonne (icona/etichetta + contenuto), stile Bioprofile."""
+    table = doc.add_table(rows=1, cols=2)
+    table.autofit = False
+    col_label, col_content = table.rows[0].cells
+    col_label.width = Cm(3.2)
+    col_content.width = Cm(13.8)
+
+    for c in (col_label, col_content):
+        set_cell_border(c, val="nil", color="FFFFFF")
+
+    col_label.vertical_alignment = 1
+    p_icon = col_label.paragraphs[0]
+    p_icon.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    if icon_image:
+        add_icon_image(p_icon, icon_image, width_cm=0.9)
+    elif icon_char:
+        r_icon = p_icon.add_run(icon_char)
+        set_run_font(r_icon, size=18, color=NAVY, bold=False)
+
+    p_label = col_label.add_paragraph()
+    p_label.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r_label = p_label.add_run(label.upper())
+    set_run_font(r_label, size=9, color=NAVY, bold=True)
+
+    p = col_content.paragraphs[0]
+    r_text = p.add_run(body_text or "")
+    set_run_font(r_text, size=10, color=GRAY_TEXT, bold=False)
+    if url:
+        p.add_run(" ")
+        add_hyperlink(p, "(Link)", url)
+
+    if not is_last:
+        p_rule = doc.add_paragraph()
+        add_paragraph_border(p_rule, sides=("bottom",), color=GRAY_LINE, sz="4", space="4")
+
+
+
+
 def generate_docx(d, data_meeting):
-    """Genera il documento Word nel formato CZP."""
+    """Genera il documento Word nel formato CZP (stile Bioprofile)."""
     doc = Document()
 
     section = doc.sections[0]
@@ -267,139 +437,72 @@ def generate_docx(d, data_meeting):
 
     styles = doc.styles
     try:
-        hl_style = styles["Hyperlink"]
+        styles["Hyperlink"]
     except KeyError:
         hl_style = styles.add_style("Hyperlink", 2)
         hl_style.font.color.rgb = RGBColor(0x11, 0x55, 0xCC)
         hl_style.font.underline = True
 
-    if data_meeting:
-        try:
-            dt = datetime.strptime(data_meeting, "%Y-%m-%d")
-            today = dt.strftime("%-d %B %Y")
-        except Exception:
-            today = data_meeting
-    else:
-        today = datetime.now().strftime("%-d %B %Y")
-
-    p = doc.add_paragraph()
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = p.add_run("BRIEFING NOTE")
-    run.bold = True
-    run.font.size = Pt(20)
-    run.font.color.rgb = RGBColor(0x1F, 0x38, 0x64)
-    run.font.name = "Arial"
-
-    p = doc.add_paragraph()
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = p.add_run(d.get("istituzione_contesto", ""))
-    run.font.size = Pt(12)
-    run.font.color.rgb = RGBColor(0x44, 0x44, 0x44)
-    run.font.name = "Arial"
-
-    p = doc.add_paragraph()
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = p.add_run(today)
-    run.font.size = Pt(11)
-    run.font.color.rgb = RGBColor(0x77, 0x77, 0x77)
-    run.font.name = "Arial"
-
-    doc.add_paragraph()
-
+    # --- Nome ---
     p = doc.add_paragraph()
     run = p.add_run(d.get("nome", ""))
-    run.bold = True
-    run.font.size = Pt(26)
-    run.font.color.rgb = RGBColor(0x1F, 0x38, 0x64)
-    run.font.name = "Arial"
-
-    pPr = p._p.get_or_add_pPr()
-    pBdr = OxmlElement("w:pBdr")
-    bottom = OxmlElement("w:bottom")
-    bottom.set(qn("w:val"), "single")
-    bottom.set(qn("w:sz"), "12")
-    bottom.set(qn("w:space"), "4")
-    bottom.set(qn("w:color"), "1F3864")
-    pBdr.append(bottom)
-    pPr.append(pBdr)
-
-    for text in [d.get("luogo_nascita", ""), d.get("ruolo_attuale", ""), d.get("background_sintetico", "")]:
-        p = doc.add_paragraph()
-        run = p.add_run(text)
-        run.font.size = Pt(10)
-        run.font.name = "Arial"
+    set_run_font(run, size=28, color=NAVY, bold=True)
+    add_paragraph_border(p, sides=("bottom",), color="002060", sz="12", space="6")
 
     doc.add_paragraph()
 
-    table = doc.add_table(rows=0, cols=2)
-    table.style = "Table Grid"
+    # --- Riquadro foto tonda + anagrafica ---
+    header_table = doc.add_table(rows=1, cols=2)
+    header_table.autofit = False
+    photo_cell, info_cell = header_table.rows[0].cells
+    photo_cell.width = Cm(3.5)
+    info_cell.width = Cm(13.5)
+    set_row_height(header_table.rows[0], 3.5, rule="atLeast")
 
-    col_widths = [Cm(4.5), Cm(13.5)]
+    for c in (photo_cell, info_cell):
+        set_cell_border(c, val="nil", color="FFFFFF")
+    photo_cell.vertical_alignment = 1
+    p_photo = photo_cell.paragraphs[0]
+    p_photo.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    add_circle_photo_placeholder(p_photo, diameter_pt=90)
 
-    def add_table_row(label, text, url=None, is_focus=False, focus_items=None):
-        row = table.add_row()
-        row.cells[0].width = col_widths[0]
-        row.cells[1].width = col_widths[1]
+    info_cell.vertical_alignment = 1
+    p1 = info_cell.paragraphs[0]
+    r_icon = p1.add_run("● ")
+    set_run_font(r_icon, size=10, color=NAVY, bold=True)
+    r_txt = p1.add_run(d.get("luogo_nascita", ""))
+    set_run_font(r_txt, size=10, color=GRAY_TEXT, bold=False)
 
-        set_cell_border(row.cells[0])
-        set_cell_shading(row.cells[0])
-        p_label = row.cells[0].paragraphs[0]
-        run = p_label.add_run(label)
-        run.bold = True
-        run.font.size = Pt(10)
-        run.font.name = "Arial"
+    p2 = info_cell.add_paragraph()
+    r_icon2 = p2.add_run("● ")
+    set_run_font(r_icon2, size=10, color=NAVY, bold=True)
+    r_txt2 = p2.add_run(d.get("ruolo_attuale", ""))
+    set_run_font(r_txt2, size=10, color=GRAY_TEXT, bold=False)
 
-        set_cell_border(row.cells[1])
+    p_rule = doc.add_paragraph()
+    add_paragraph_border(p_rule, sides=("bottom",), color="002060", sz="6", space="6")
 
-        if is_focus and focus_items:
-            cell = row.cells[1]
-            first = True
-            for item in focus_items:
-                if first:
-                    p_content = cell.paragraphs[0]
-                    first = False
-                else:
-                    p_content = cell.add_paragraph()
+    # --- Sezioni: carriera (icona omino) ---
+    icon_prof = ICON_PROFESSIONALE if os.path.exists(ICON_PROFESSIONALE) else None
 
-                run_title = p_content.add_run(item.get("titolo", "") + ". ")
-                run_title.bold = True
-                run_title.font.size = Pt(10)
-                run_title.font.name = "Arial"
+    add_section(doc, "Carriera professionale",
+                body_text=d.get("carriera_professionale", ""),
+                url=d.get("carriera_professionale_url"),
+                icon_image=icon_prof, icon_char=None if icon_prof else "◆")
 
-                run_text = p_content.add_run(item.get("testo", ""))
-                run_text.font.size = Pt(10)
-                run_text.font.name = "Arial"
+    add_section(doc, "Carriera politica",
+                body_text=d.get("carriera_politica", ""),
+                url=d.get("carriera_politica_url"),
+                icon_image=icon_prof, icon_char=None if icon_prof else "◆")
 
-                if item.get("url"):
-                    run_space = p_content.add_run(" ")
-                    run_space.font.size = Pt(10)
-                    add_hyperlink(p_content, "(Link)", item["url"])
-        else:
-            p_content = row.cells[1].paragraphs[0]
-            run_text = p_content.add_run(text or "")
-            run_text.font.size = Pt(10)
-            run_text.font.name = "Arial"
-            if url:
-                run_space = p_content.add_run(" ")
-                run_space.font.size = Pt(10)
-                add_hyperlink(p_content, "(Link)", url)
-
-    add_table_row(
-        "Carriera professionale",
-        d.get("carriera_professionale", ""),
-        d.get("carriera_professionale_url")
-    )
-    add_table_row(
-        "Carriera politica",
-        d.get("carriera_politica", ""),
-        d.get("carriera_politica_url")
-    )
-    add_table_row(
-        f"Focus: {d.get('focus_titolo', '')}",
-        None,
-        is_focus=True,
-        focus_items=d.get("focus_items", [])
-    )
+    # --- Focus: ogni voce è una sezione a sé con icona lente ---
+    focus_items = d.get("focus_items", []) or []
+    for i, item in enumerate(focus_items):
+        add_section(doc, item.get("titolo", ""),
+                    body_text=item.get("testo", ""),
+                    url=item.get("url"),
+                    icon_char="🔍",
+                    is_last=(i == len(focus_items) - 1))
 
     buf = io.BytesIO()
     doc.save(buf)

@@ -99,7 +99,9 @@ Formato JSON esatto:
   ]
 }
 
-focus_items: 4-6 voci rilevanti al focus tematico richiesto, ciascuna con fonte propria quando disponibile."""
+focus_items: 4-6 voci rilevanti al focus tematico richiesto, ciascuna con fonte propria quando disponibile.
+
+ORDINE: ordina i focus_items dal più recente al meno recente, basandoti sulle date/eventi menzionati nel testo di ricerca per ciascun punto (se una voce non ha una data esplicita, posizionala in base al contesto temporale più plausibile). Il primo elemento dell'array deve essere il fatto/dichiarazione più recente."""
 
 # --- Stile grafico del documento Word (formato "Bioprofile" CZP) ---
 FONT_NAME = "Trebuchet MS"

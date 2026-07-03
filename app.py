@@ -72,7 +72,7 @@ Ti viene fornito un testo con informazioni su una persona, già corredato di URL
 
 Regole assolute:
 - Rispondi SOLO con JSON valido, nessun testo prima o dopo
-- Nessun tag HTML, nessun markdown, nessun <cite>, testo plain
+- Nessun tag HTML, nessun markdown, nessun , testo plain
 - Italiano formale e istituzionale
 - Se un'informazione non è disponibile scrivi "Dato non disponibile"
 - Per ogni campo "_url" e ogni "url" nei focus_items: riporta l'URL esatto fornito nel testo di ricerca per quel punto specifico. Se il testo non fornisce un URL per un dato punto, usa null — non inventare e non riutilizzare un URL di un altro punto.
@@ -117,7 +117,7 @@ def strip_cite(text):
     """Rimuove tag <cite> e markup dal testo."""
     if not text:
         return text
-    text = re.sub(r'<cite[^>]*>([\s\S]*?)</cite>', r'\1', text)
+    text = re.sub(r'<cite[^>]*>([\s\S]*?)', r'\1', text)
     text = re.sub(r'</?cite[^>]*>', '', text)
     text = re.sub(r'\[?\(Link\)\]?\([^)]*\)', '', text)
     text = re.sub(r'\s+', ' ', text).strip()
@@ -193,7 +193,7 @@ Rispondi SOLO con JSON valido, testo plain senza tag HTML."""
 
     response = client.messages.create(
         model=MODEL,
-        max_tokens=4000,
+        max_tokens=8000,
         system=JSON_SYSTEM,
         messages=[{"role": "user", "content": user_msg}],
     )
@@ -421,8 +421,6 @@ def add_section(doc, label, body_text=None, url=None, icon_char=None, icon_image
     if not is_last:
         p_rule = doc.add_paragraph()
         add_paragraph_border(p_rule, sides=("bottom",), color=GRAY_LINE, sz="4", space="4")
-
-
 
 
 def generate_docx(d, data_meeting):
